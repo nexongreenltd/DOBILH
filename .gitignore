@@ -1,0 +1,13 @@
+node_modules
+.next
+.env
+.dev-db
+storage/uploads/*
+!storage/uploads/.gitkeep
+*.tsbuildinfo
+next-env.d.ts
+.next-dev
+.DS_Store
+*.log
+# Client proposal document (contains budget details) — kept out of the public repo
+DoB_Innovation_Learning_Hub_LMS_.pdf
