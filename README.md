@@ -130,13 +130,18 @@ Each course sets rules (min lesson completion %, min attendance %, pass-all-asse
 
 ## Deploying to Railway
 
-The repo is ready for Railway: `Dockerfile` (Node 22 + ffmpeg + pg_dump 18), `railway.json` (web: migrations before each deploy, `/api/health` healthcheck), and `railway/backup.json` / `railway/reminders.json` (cron services).
+The repo is ready for Railway: the `Dockerfile` (Node 22 + ffmpeg + pg_dump 18) is picked up automatically. Service settings live in Railway (project `dob-innovation-learning-hub`, region Singapore):
 
-1. Create a project from this GitHub repo (service `web`) and add **PostgreSQL**.
-2. On `web`: attach a volume at `/data`, then set `DATABASE_URL=${{Postgres.DATABASE_URL}}`, `AUTH_SECRET`, `NEXT_PUBLIC_APP_URL`, the `R2_*`, `LIVEKIT_*`, `RESEND_API_KEY`/`EMAIL_FROM` and `ANTHROPIC_API_KEY` variables.
-3. Add two more services from the same repo, set their config file to `railway/backup.json` and `railway/reminders.json`, and give them `DATABASE_URL` (+ `R2_*`, `RESEND_API_KEY`, `EMAIL_FROM`, `NEXT_PUBLIC_APP_URL`).
-4. After the first deploy: `railway ssh -s web` → `npm run create-admin -- --email you@… --name "…"`.
-5. Add the custom domain, then update `NEXT_PUBLIC_APP_URL`.
+| Service | Settings |
+|---|---|
+| `web` | volume at `/data`; pre-deploy `npx prisma migrate deploy`; healthcheck `/api/health`; restart on failure |
+| `Postgres` | Railway PostgreSQL 18 |
+| `backup` | cron `0 20 * * *` (2 am Dhaka) → `npm run backup` |
+| `reminders` | cron `*/15 * * * *` → `npm run cron:reminders` |
+
+Variables are set on `web`; `backup` and `reminders` reference them (`${{web.R2_BUCKET}}` etc.), so each key is entered once.
+
+First admin, after the first deploy: `railway ssh -s web` → `npm run create-admin -- --email you@… --name "…"`.
 
 ## Production notes
 - Payments run in `manual` mode until the PayPlus API is connected: learners reserve a seat, staff send the payment link and confirm the payment in Admin → Payments. The sandbox page refuses to confirm anything outside `sandbox` mode.
