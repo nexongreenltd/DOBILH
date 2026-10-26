@@ -14,7 +14,8 @@ import { formatDateTime } from "./utils";
  * Anything the assistant can't answer is flagged for the admin review queue.
  */
 
-const MODEL = "claude-opus-5-5";
+// AI_MODEL=claude-sonnet-5-5 halves the cost; Opus gives the strongest answers.
+const MODEL = process.env.AI_MODEL || "claude-opus-5-5";
 const MATCH_THRESHOLD = 2.5;
 
 const STOP = new Set(

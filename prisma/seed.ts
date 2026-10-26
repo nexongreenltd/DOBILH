@@ -388,7 +388,9 @@ async function main() {
           data: {
             batchId: running.id, lessonId: lesson.id, title: `Class ${si + 1}: ${lesson.title}`, mode, startsAt,
             endsAt: new Date(startsAt.getTime() + 2 * 3600000),
-            liveUrl: mode === "ONLINE" ? "https://meet.google.com/dob-learn-hub" : null,
+            // Upcoming online classes run on DoB Live (in-app); past ones used an external link.
+            hosting: mode === "ONLINE" && off >= 0 ? "PLATFORM" : "EXTERNAL",
+            liveUrl: mode === "ONLINE" && off < 0 ? "https://meet.google.com/dob-learn-hub" : null,
             venue: mode === "OFFLINE" ? (c.venue ?? "DoB Innovation Lab") : null,
             status: off < 0 ? "COMPLETED" : "SCHEDULED",
             recordingUrl: off < 0 && mode === "ONLINE" ? "https://www.youtube.com/embed/ysz5S6PUM-U" : null,

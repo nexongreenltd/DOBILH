@@ -2,7 +2,7 @@ import { db } from "@/lib/db";
 import { requireAdmin } from "@/lib/auth";
 import { platformAnnouncement } from "@/app/actions/admin";
 import { ActionForm, SubmitButton } from "@/components/forms";
-import { Avatar, Badge, Card, CardHeader, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
+import { Avatar, Badge, Card, CardHeader, Checkbox, Field, Input, PageHeader, Select, Textarea } from "@/components/ui";
 import { timeAgo } from "@/lib/utils";
 
 export const metadata = { title: "Announcements" };
@@ -26,6 +26,7 @@ export default async function AdminAnnouncements() {
             <Field label="Or a specific course" hint="Overrides the audience above"><Select name="courseId" defaultValue=""><option value="">—</option>{courses.map((c) => <option key={c.id} value={c.id}>{c.title}</option>)}</Select></Field>
             <Field label="Title"><Input name="title" required /></Field>
             <Field label="Message"><Textarea name="body" rows={5} required /></Field>
+            <Checkbox name="sendEmail" label="Also send by email" />
             <SubmitButton>Send</SubmitButton>
           </ActionForm>
         </Card>

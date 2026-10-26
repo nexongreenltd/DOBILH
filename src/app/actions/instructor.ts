@@ -6,7 +6,7 @@ import { z } from "zod";
 import type { AssessmentType, AttendanceStatus, CourseMode, MaterialType, QuestionType, SessionStatus, Visibility } from "@prisma/client";
 import { db } from "@/lib/db";
 import { assertCanManageCourse, requireStaffOrInstructor } from "@/lib/auth";
-import { saveUpload, fileFromForm, UploadError } from "@/lib/storage";
+import { saveUpload, fileFromForm, completeDirectUpload, UploadError } from "@/lib/storage";
 import { audit } from "@/lib/audit";
 import { notifyMany, learnerIds } from "@/lib/notify";
 import { str, optStr, int, fromLocalInput } from "@/lib/utils";
@@ -80,11 +80,12 @@ export async function addMaterial(_: ActionResult, form: FormData): Promise<Acti
   let url = optStr(form, "url");
   if (url && !/^https:\/\//.test(url)) return { error: "Links must start with https://" };
   if (url && type === "VIDEO") url = toEmbedUrl(url);
-  if (!upload && !url) return { error: "Upload a file or paste a link." };
+  const directKey = optStr(form, "uploadKey");
+  if (!upload && !url && !directKey) return { error: "Upload a file or paste a link." };
   let fileId: string | null = null;
-  if (upload) {
+  if (upload || directKey) {
     try {
-      fileId = (await saveUpload(upload, user.id)).id;
+      fileId = directKey ? (await completeDirectUpload(directKey, str(form, "uploadName"), user.id)).id : (await saveUpload(upload!, user.id)).id;
     } catch (e) {
       return { error: e instanceof UploadError ? e.message : "Upload failed." };
     }
@@ -123,7 +124,9 @@ export async function createSession(_: ActionResult, form: FormData): Promise<Ac
   const minutes = int(form, "durationMin", 120);
   if (!startsAt) return { error: "Choose a start time." };
   const mode = (str(form, "mode") as CourseMode) || "ONLINE";
+  const hosting = str(form, "hosting") === "EXTERNAL" ? "EXTERNAL" : "PLATFORM";
   const liveUrl = optStr(form, "liveUrl");
+  if (mode === "ONLINE" && hosting === "EXTERNAL" && !liveUrl) return { error: "Add the Zoom / Meet link, or choose DoB Live." };
   if (mode === "ONLINE" && liveUrl && !/^https:\/\//.test(liveUrl)) return { error: "Live link must start with https://" };
   const session = await db.classSession.create({
     data: {
@@ -133,7 +136,8 @@ export async function createSession(_: ActionResult, form: FormData): Promise<Ac
       mode,
       startsAt,
       endsAt: new Date(startsAt.getTime() + minutes * 60000),
-      liveUrl: mode === "ONLINE" ? liveUrl : null,
+      hosting: mode === "ONLINE" ? hosting : "EXTERNAL",
+      liveUrl: mode === "ONLINE" && hosting === "EXTERNAL" ? liveUrl : null,
       venue: mode !== "ONLINE" ? optStr(form, "venue") ?? batch.venue : null,
     },
   });
@@ -141,7 +145,8 @@ export async function createSession(_: ActionResult, form: FormData): Promise<Ac
     type: "session",
     title: "New class scheduled",
     body: `${session.title} — ${startsAt.toLocaleString("en-GB", { timeZone: "Asia/Dhaka", dateStyle: "medium", timeStyle: "short" })}`,
-    link: "/dashboard/schedule",
+    link: mode === "ONLINE" && hosting === "PLATFORM" ? `/live/${session.id}` : "/dashboard/schedule",
+    email: true,
   });
   await audit(user.id, "session.create", "ClassSession", session.id, { batchId: batch.id });
   revalidatePath("/instructor/sessions");
@@ -157,11 +162,34 @@ export async function updateSessionStatus(form: FormData) {
   if (!["SCHEDULED", "LIVE", "COMPLETED", "CANCELLED"].includes(status)) return;
   await db.classSession.update({ where: { id: session.id }, data: { status, recordingUrl: optStr(form, "recordingUrl") ?? session.recordingUrl } });
   if (status === "CANCELLED") {
-    await notifyMany(await learnerIds(session.batch.courseId, session.batchId), { type: "session", title: "Class cancelled", body: `${session.title} has been cancelled.`, link: "/dashboard/schedule" });
+    await notifyMany(await learnerIds(session.batch.courseId, session.batchId), { type: "session", title: "Class cancelled", body: `${session.title} has been cancelled.`, link: "/dashboard/schedule", email: true });
   }
   await audit(user.id, "session.status", "ClassSession", session.id, { status });
   revalidatePath(`/instructor/sessions/${session.id}`);
   revalidatePath("/instructor/sessions");
+}
+
+/** Instructor/admin ends a live class from the session page (e.g. the studio tab was closed). */
+export async function forceEndLive(form: FormData) {
+  const session = await db.classSession.findUnique({ where: { id: str(form, "sessionId") }, include: { batch: true } });
+  if (!session) return;
+  const user = await guardCourse(session.batch.courseId);
+  const { endLive } = await import("@/lib/live");
+  await endLive(session.id, user.id);
+  revalidatePath(`/instructor/sessions/${session.id}`);
+}
+
+/** Retry publishing a recording whose processing failed. */
+export async function retryRecording(form: FormData) {
+  const session = await db.classSession.findUnique({ where: { id: str(form, "sessionId") }, include: { batch: true } });
+  if (!session || session.recordingStatus !== "FAILED") return;
+  const user = await guardCourse(session.batch.courseId);
+  const { processRecording } = await import("@/lib/live");
+  await db.classSession.update({ where: { id: session.id }, data: { recordingStatus: "PROCESSING" } });
+  void processRecording(session.id, user.id).catch(async () => {
+    await db.classSession.update({ where: { id: session.id }, data: { recordingStatus: "FAILED" } });
+  });
+  revalidatePath(`/instructor/sessions/${session.id}`);
 }
 
 export async function saveAttendance(_: ActionResult, form: FormData): Promise<ActionResult> {

@@ -16,17 +16,27 @@
     "db:seed": "tsx prisma/seed.ts",
     "db:reset": "prisma db push --force-reset && tsx prisma/seed.ts",
     "db:studio": "prisma studio",
-    "postinstall": "prisma generate"
+    "live:dev": "livekit-server --dev --bind 127.0.0.1",
+    "postinstall": "prisma generate",
+    "create-admin": "tsx scripts/create-admin.ts",
+    "backup": "tsx scripts/backup.ts",
+    "cron:reminders": "tsx --conditions=react-server scripts/reminders.ts"
   },
   "prisma": {
     "seed": "tsx prisma/seed.ts"
   },
   "dependencies": {
     "@anthropic-ai/sdk": "^0.135.0",
+    "@aws-sdk/client-s3": "^3.1157.0",
+    "@aws-sdk/s3-request-presigner": "^3.1157.0",
+    "@livekit/components-react": "^2.9.24",
+    "@livekit/components-styles": "^1.2.0",
     "@prisma/client": "6.19",
     "bcryptjs": "^3.0.3",
     "clsx": "^2.1.1",
     "jose": "^5.10.0",
+    "livekit-client": "^2.23.0",
+    "livekit-server-sdk": "^2.19.1",
     "lucide-react": "^0.577.0",
     "motion": "^12.43.0",
     "next": "15.5",

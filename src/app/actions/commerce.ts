@@ -4,9 +4,9 @@ import { redirect } from "next/navigation";
 import { revalidatePath } from "next/cache";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { invoiceNo, quote, settlePayment, verifyCallback } from "@/lib/payments";
+import { invoiceNo, paymentMode, quote, settlePayment, verifyCallback } from "@/lib/payments";
 import { audit } from "@/lib/audit";
-import { notify } from "@/lib/notify";
+import { notify, notifyMany } from "@/lib/notify";
 import { str } from "@/lib/utils";
 import type { ActionResult } from "@/lib/action";
 import type { PaymentMethod } from "@prisma/client";
@@ -64,7 +64,7 @@ export async function checkout(_: ActionResult, form: FormData): Promise<ActionR
       discount: q.discount,
       amount: q.amount,
       method,
-      gateway: q.amount === 0 ? "free" : "sandbox",
+      gateway: q.amount === 0 ? "free" : paymentMode(),
       couponId: q.coupon?.id ?? null,
     },
   });
@@ -73,6 +73,16 @@ export async function checkout(_: ActionResult, form: FormData): Promise<ActionR
   if (q.amount === 0) {
     await settlePayment(payment.id, { gatewayRef: `FREE-${payment.invoiceNo}`, method: "FREE" });
     redirect(`/dashboard/courses/${course.id}?welcome=1`);
+  }
+  if (paymentMode() === "manual") {
+    const staff = await db.user.findMany({ where: { role: { in: ["ADMIN", "SUPER_ADMIN"] }, status: "ACTIVE" }, select: { id: true } });
+    await notifyMany(staff.map((s) => s.id), {
+      type: "payment",
+      title: "New order awaiting payment",
+      body: `${user.name} reserved ${course.title} (${payment.invoiceNo}). Send the PayPlus link and confirm it once paid.`,
+      link: "/admin/payments",
+      email: true,
+    });
   }
   redirect(`/pay/${payment.id}`);
 }
@@ -88,6 +98,11 @@ export async function gatewayCallback(form: FormData) {
   const payment = await db.payment.findUnique({ where: { id: paymentId }, include: { enrollment: true } });
   if (!payment || payment.userId !== user.id) redirect("/dashboard/payments");
   if (payment.status !== "PENDING") redirect(`/pay/${payment.id}`);
+  // The simulated gateway only exists in sandbox mode; in production nobody can self-confirm a payment.
+  if (paymentMode() !== "sandbox") {
+    await audit(user.id, "payment.sandbox_blocked", "Payment", payment.id);
+    redirect(`/pay/${payment.id}`);
+  }
 
   // The (sandbox) provider page posts ref + HMAC signature; tampering with amount/status/ref fails here.
   const ref = str(form, "ref");

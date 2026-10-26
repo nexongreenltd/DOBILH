@@ -42,6 +42,19 @@ export async function setLessonComplete(form: FormData) {
   redirect(`/dashboard/courses/${lesson.courseId}?lesson=${next?.id ?? lesson.id}${done ? `&completed=${lesson.id}` : ""}`);
 }
 
+/** Called by the replay player once 80% of a class recording has been watched. */
+export async function completeLessonFromReplay(lessonId: string) {
+  const user = await requireUser();
+  const lesson = await loadAccessibleLesson(user.id, lessonId);
+  if (!lesson) return;
+  await db.lessonProgress.upsert({
+    where: { studentId_lessonId: { studentId: user.id, lessonId: lesson.id } },
+    create: { studentId: user.id, lessonId: lesson.id, completionPct: 100, completedAt: new Date() },
+    update: { completionPct: 100, completedAt: new Date(), lastViewedAt: new Date() },
+  });
+  revalidatePath(`/dashboard/courses/${lesson.courseId}`);
+}
+
 // ───────── Assessments ─────────
 
 async function loadAssessmentForStudent(userId: string, assessmentId: string) {

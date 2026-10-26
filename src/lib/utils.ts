@@ -30,11 +30,11 @@ export function formatDate(d: Date | string | null | undefined, opts: Intl.DateT
 }
 
 export function formatDateTime(d: Date | string | null | undefined) {
-  return formatDate(d, { hour: "numeric", minute: "2-digit", hour12: true });
+  return formatDate(d, { hour: "numeric", minute: "2-digit", hourCycle: "h12" });
 }
 
 export function formatTime(d: Date | string) {
-  return new Intl.DateTimeFormat("en-GB", { hour: "numeric", minute: "2-digit", hour12: true, timeZone: TZ }).format(new Date(d));
+  return new Intl.DateTimeFormat("en-GB", { hour: "numeric", minute: "2-digit", hourCycle: "h12", timeZone: TZ }).format(new Date(d));
 }
 
 export function timeAgo(d: Date | string) {

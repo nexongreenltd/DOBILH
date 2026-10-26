@@ -122,6 +122,7 @@ export async function issueCertificate(enrollmentId: string, actorId: string | n
     title: "Your certificate is ready",
     body: `Congratulations on completing ${enrollment.course.title}.`,
     link: `/certificates/${cert.certificateNo}`,
+    email: true,
   });
   await audit(actorId, "certificate.issue", "Certificate", cert.id, { certificateNo: cert.certificateNo });
   return cert;

@@ -1,10 +1,13 @@
 import Link from "next/link";
 import { notFound, redirect } from "next/navigation";
-import { CheckCircle2, Circle, Lock, PlayCircle, FileText, Presentation, Link2, Download, ExternalLink, CalendarDays, MapPin, Video, Megaphone, ClipboardCheck, Award, PartyPopper } from "lucide-react";
+import { CheckCircle2, Circle, Lock, PlayCircle, FileText, Presentation, Link2, Download, ExternalLink, CalendarDays, MapPin, Video, Megaphone, ClipboardCheck, Award, PartyPopper, Radio } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { getActiveEnrollment, courseProgress, attendanceSummary, assessmentSummary, touchLesson } from "@/lib/learning";
+import { replayAccess } from "@/lib/live";
+import { ReplayPlayer } from "@/components/live/replay-player";
 import { setLessonComplete } from "@/app/actions/student";
+import { SessionJoin } from "@/components/session-join";
 import { Alert, Avatar, Badge, Card, CardHeader, EmptyState, IconChip, InfoTile, Panel, Progress, StatusBadge, Tabs } from "@/components/ui";
 import { SubmitButton } from "@/components/forms";
 import { cn, formatDate, formatDateTime, humanize, timeAgo } from "@/lib/utils";
@@ -27,12 +30,29 @@ export default async function LearnCourse({ params, searchParams }: { params: Pr
   const lessons = await db.lesson.findMany({
     where: { courseId },
     orderBy: { orderNo: "asc" },
-    include: { materials: { where: { visibility: { not: "HIDDEN" } }, orderBy: { orderNo: "asc" }, include: { file: true } }, progress: { where: { studentId: user.id } } },
+    include: {
+      materials: {
+        where: { visibility: { not: "HIDDEN" } },
+        orderBy: { orderNo: "asc" },
+        include: { file: true, recordingOf: { select: { id: true, batchId: true, liveEndedAt: true, liveStartedAt: true, batch: { select: { courseId: true } } } } },
+      },
+      progress: { where: { studentId: user.id } },
+    },
   });
   const released = lessons.filter((l) => l.publishAt && l.publishAt <= now);
   const firstIncomplete = released.find((l) => !l.progress[0]?.completedAt);
   const current = released.find((l) => l.id === sp.lesson) ?? firstIncomplete ?? released[0];
   if (current) await touchLesson(user.id, current.id);
+
+  // Live-class replay on this lesson: policy check + chat transcript.
+  const replayMat = current?.materials.find((m) => m.recordingOf && m.file);
+  const replay = replayMat ? await replayAccess(user.id, user.role, replayMat.recordingOf!) : null;
+  const transcript =
+    replayMat && replay?.ok
+      ? (await db.liveChatMessage.findMany({ where: { sessionId: replayMat.recordingOf!.id }, include: { user: { select: { name: true } } }, orderBy: { createdAt: "asc" } })).map((m) => ({
+          id: m.id, kind: m.kind, body: m.body, offsetSec: m.offsetSec, answered: !!m.answeredAt, name: m.user.name,
+        }))
+      : [];
 
   const tab = sp.tab ?? "lessons";
   const [progress, attendance, assess] = await Promise.all([
@@ -103,8 +123,24 @@ export default async function LearnCourse({ params, searchParams }: { params: Pr
 
           {current ? (
             <div className="space-y-5">
+              {replayMat && replay && (replay.ok ? (
+                <ReplayPlayer
+                  src={`/api/files/${replayMat.file!.id}`}
+                  materialId={replayMat.id}
+                  lessonId={current.id}
+                  completed={!!current.progress[0]?.completedAt}
+                  transcript={transcript}
+                  recordedOn={formatDateTime(replayMat.recordingOf!.liveStartedAt)}
+                />
+              ) : (
+                <div className="flex aspect-video flex-col items-center justify-center gap-2 rounded-2xl border border-[#e8ebf1] bg-white p-6 text-center">
+                  <Lock className="size-6 text-muted-500" />
+                  <div className="font-medium text-navy-950">Class replay unavailable</div>
+                  <p className="max-w-sm text-sm text-muted-600">{replay.reason}</p>
+                </div>
+              ))}
               {(() => {
-                const video = current.materials.find((m) => m.type === "VIDEO" && m.url);
+                const video = !replayMat && current.materials.find((m) => m.type === "VIDEO" && m.url);
                 return video ? (
                   <div className="aspect-video overflow-hidden rounded-2xl border border-[#e8ebf1] bg-navy-950 shadow-lg">
                     <iframe src={video.url!} title={video.title} className="size-full" allow="accelerometer; autoplay; clipboard-write; encrypted-media; picture-in-picture" allowFullScreen />
@@ -132,6 +168,18 @@ export default async function LearnCourse({ params, searchParams }: { params: Pr
               <Panel title={`Resources · ${current.materials.length}`}>
                 {current.materials.length === 0 && <div className="px-2 py-4 text-sm text-muted-500">No resources yet for this lesson.</div>}
                 {current.materials.map((m) => {
+                  if (m.recordingOf) {
+                    return (
+                      <div key={m.id} className="flex items-center gap-3 rounded-xl border border-[#e8ebf1] bg-white p-3">
+                        <IconChip tone="red"><Radio /></IconChip>
+                        <div className="min-w-0 flex-1">
+                          <div className="text-[11px] text-muted-500">Live class replay{m.file ? ` · ${(m.file.size / 1048576).toFixed(0)} MB` : ""} · streaming only</div>
+                          <div className="truncate text-sm font-medium text-navy-950">{m.title}</div>
+                        </div>
+                        {replay && !replay.ok && <Lock className="size-4 text-muted-500" />}
+                      </div>
+                    );
+                  }
                   const I = MAT_ICON[m.type];
                   const href = m.file ? `/api/files/${m.file.id}` : m.url ?? "#";
                   const tone = m.type === "VIDEO" ? "red" : m.type === "PDF" ? "orange" : m.type === "SLIDE" ? "violet" : "azure";
@@ -215,7 +263,7 @@ export default async function LearnCourse({ params, searchParams }: { params: Pr
 
 async function ScheduleTab({ userId, batchId, attendance }: { userId: string; batchId: string | null; attendance: { held: number; attended: number; pct: number } }) {
   if (!batchId) return <Card><EmptyState title="No batch assigned" /></Card>;
-  const sessions = await db.classSession.findMany({ where: { batchId }, orderBy: { startsAt: "asc" }, include: { attendance: { where: { studentId: userId } } } });
+  const sessions = (await db.classSession.findMany({ where: { batchId }, orderBy: { startsAt: "asc" }, include: { attendance: { where: { studentId: userId } }, batch: { select: { courseId: true } } } })).map((s) => ({ ...s, batchCourseId: s.batch.courseId }));
   const now = new Date();
   return (
     <div className="space-y-4">
@@ -237,8 +285,7 @@ async function ScheduleTab({ userId, batchId, attendance }: { userId: string; ba
                   <div className="text-xs text-muted-500">{formatDateTime(s.startsAt)} · {s.mode === "ONLINE" ? "Online" : s.venue}</div>
                 </div>
                 {s.status === "CANCELLED" ? <StatusBadge status="CANCELLED" /> : past ? (mark ? <StatusBadge status={mark} /> : <Badge>Not marked</Badge>) : <StatusBadge status="SCHEDULED" />}
-                {past && s.recordingUrl && <a href={s.recordingUrl} target="_blank" className="text-sm font-medium text-azure-500">Recording</a>}
-                {!past && s.mode === "ONLINE" && s.liveUrl && <a href={s.liveUrl} target="_blank" className="rounded-lg bg-navy-950 px-3 py-1.5 text-xs font-semibold text-white">Join link</a>}
+                <SessionJoin s={{ ...s, batch: { courseId: s.batchCourseId } }} />
               </li>
             );
           })}

@@ -42,16 +42,21 @@ export const getCurrentUser = cache(async (): Promise<CurrentUser | null> => {
   if (!session) return null;
   const user = await db.user.findUnique({
     where: { id: session.sub },
-    select: { id: true, name: true, email: true, role: true, status: true, avatarColor: true, phone: true, headline: true },
+    select: { id: true, name: true, email: true, role: true, status: true, avatarColor: true, phone: true, headline: true, sessionsValidFrom: true },
   });
   if (!user || user.status === "SUSPENDED") return null;
+  // Sessions issued before a password reset are no longer valid.
+  const issuedAt = (session as { iat?: number }).iat ?? 0;
+  if (user.sessionsValidFrom && issuedAt < Math.floor(user.sessionsValidFrom.getTime() / 1000)) return null;
   return user;
 });
 
 /** Server-side authorization guard for pages and actions. */
 export async function requireUser(roles?: Role[]) {
   const user = await getCurrentUser();
-  if (!user) redirect("/login");
+  // A validly signed cookie for a deleted or suspended user must be cleared first; otherwise
+  // middleware bounces /login straight back here and the browser loops.
+  if (!user) redirect((await cookies()).has(SESSION_COOKIE) ? "/api/auth/reset" : "/login");
   if (roles && !roles.includes(user.role)) redirect("/forbidden");
   return user;
 }

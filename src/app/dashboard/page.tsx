@@ -5,6 +5,7 @@ import { requireUser } from "@/lib/auth";
 import { courseProgress, attendanceSummary } from "@/lib/learning";
 import { Card, CardHeader, CourseCover, EmptyState, IconChip, LinkButton, Progress, StatCard, StatusBadge } from "@/components/ui";
 import { WelcomeTour } from "@/components/welcome-tour";
+import { SessionJoin } from "@/components/session-join";
 import { formatDateTime, formatTime, timeAgo, humanize } from "@/lib/utils";
 
 export const metadata = { title: "Dashboard" };
@@ -118,8 +119,6 @@ export default async function StudentHome() {
           <div className="space-y-2 p-3">
             {sessions.length === 0 && <EmptyState icon={<CalendarClock className="size-5" />} title="No upcoming classes" />}
             {sessions.map((s) => {
-              const live = s.startsAt <= now && s.endsAt >= now;
-              const soon = s.startsAt.getTime() - now.getTime() < 15 * 60000;
               return (
                 <div key={s.id} className="rounded-xl border border-[#e8ebf1] bg-white p-3">
                   <div className="flex items-start gap-3">
@@ -132,11 +131,7 @@ export default async function StudentHome() {
                         {s.mode === "OFFLINE" && s.venue && <span className="truncate">· {s.venue}</span>}
                       </div>
                     </div>
-                    {live ? (
-                      <a href={s.liveUrl ?? "#"} target="_blank" className="rounded-lg bg-sun-500 px-3 py-1.5 text-xs font-semibold text-white">Join live</a>
-                    ) : s.mode === "ONLINE" && soon && s.liveUrl ? (
-                      <a href={s.liveUrl} target="_blank" className="rounded-lg bg-navy-950 px-3 py-1.5 text-xs font-semibold text-white">Join</a>
-                    ) : null}
+                    <SessionJoin s={s} />
                   </div>
                 </div>
               );

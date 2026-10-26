@@ -6,6 +6,8 @@ import { assertCanManageCourse, requireStaffOrInstructor } from "@/lib/auth";
 import { courseProgress, attendanceSummary } from "@/lib/learning";
 import { createLesson, updateLesson, deleteLesson, addMaterial, deleteMaterial } from "@/app/actions/instructor";
 import { SessionForm } from "@/components/session-form";
+import { FileUpload } from "@/components/file-upload";
+import { usesCloudStorage } from "@/lib/storage";
 import { ActionForm, SubmitButton } from "@/components/forms";
 import { Avatar, Badge, Card, CardHeader, Checkbox, Disclosure, EmptyState, Field, IconChip, Input, LinkButton, Progress, Select, StatusBadge, Tabs, Textarea } from "@/components/ui";
 import { formatDate, formatDateTime, humanize, toLocalInput } from "@/lib/utils";
@@ -52,6 +54,7 @@ export default async function CourseWorkspace({ params, searchParams }: { params
 }
 
 async function ContentTab({ courseId }: { courseId: string }) {
+  const directUploads = usesCloudStorage();
   const lessons = await db.lesson.findMany({ where: { courseId }, orderBy: { orderNo: "asc" }, include: { materials: { orderBy: { orderNo: "asc" }, include: { file: true } } } });
   const now = new Date();
   return (
@@ -138,7 +141,7 @@ async function ContentTab({ courseId }: { courseId: string }) {
                       </Field>
                     </div>
                     <Field label="Title"><Input name="title" required placeholder="e.g. Daily notes — Day 8" /></Field>
-                    <Field label="Upload file" hint="PDF, PPTX, DOCX, ZIP, MP4 — up to 50 MB. Stored privately."><input type="file" name="file" className="block w-full text-sm text-muted-600 file:mr-3 file:rounded-lg file:border-0 file:bg-azure-50 file:px-3 file:py-1.5 file:text-sm file:text-azure-500" /></Field>
+                    <Field label="Upload file" hint={`PDF, PPTX, DOCX, ZIP, MP4 — up to ${directUploads ? "3 GB" : "50 MB"}. Stored privately.`}><FileUpload direct={directUploads} /></Field>
                     <Field label="…or link"><Input name="url" placeholder="https://" /></Field>
                     <SubmitButton pendingText="Uploading…">Add resource</SubmitButton>
                   </ActionForm>

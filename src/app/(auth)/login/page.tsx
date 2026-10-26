@@ -12,12 +12,13 @@ const DEMO = [
   ["Super Admin", "superadmin@dob.org"],
 ];
 
-export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string }> }) {
-  const { next } = await searchParams;
+export default async function LoginPage({ searchParams }: { searchParams: Promise<{ next?: string; reset?: string }> }) {
+  const { next, reset } = await searchParams;
   return (
     <div>
       <h1 className="text-3xl font-semibold text-slate-900">Welcome back</h1>
       <p className="mt-2 text-sm text-slate-500">Sign in to continue learning.</p>
+      {reset && <p className="mt-6 rounded-xl bg-emerald-50 p-3 text-sm text-emerald-800">Password updated. Sign in with your new password.</p>}
       <ActionForm action={login} className="mt-8 space-y-4">
         <input type="hidden" name="next" value={next ?? ""} />
         <Field label="Email">
@@ -26,6 +27,9 @@ export default async function LoginPage({ searchParams }: { searchParams: Promis
         <Field label="Password">
           <Input name="password" type="password" autoComplete="current-password" required placeholder="••••••••" />
         </Field>
+        <div className="-mt-2 text-right">
+          <Link href="/forgot-password" className="text-sm font-medium text-lilac-500 hover:underline">Forgot password?</Link>
+        </div>
         <SubmitButton className="w-full" size="lg" pendingText="Signing in…">
           Sign in
         </SubmitButton>

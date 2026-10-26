@@ -36,6 +36,19 @@ export async function quote(course: Pick<Course, "id" | "price" | "salePrice">, 
 }
 
 // ─── Gateway adapter ───────────────────────────────────────────────
+// PAYMENT_MODE selects how paid checkouts are completed:
+// - sandbox: the simulated hosted page at /pay/[id] (development only — anyone could "pay").
+// - manual:  the order is reserved and staff confirm it in Admin → Payments (production default
+//            until the PayPlus API is connected).
+
+export type PaymentMode = "sandbox" | "manual";
+
+export function paymentMode(): PaymentMode {
+  const m = process.env.PAYMENT_MODE;
+  if (m === "sandbox" || m === "manual") return m;
+  return process.env.NODE_ENV === "production" ? "manual" : "sandbox";
+}
+
 // The sandbox gateway mimics a Bangladeshi provider (bKash / Nagad / SSLCommerz):
 // the hosted page returns a signed callback which is verified server-side before
 // enrollment is confirmed. Replace `sign`/`verifyCallback` with the provider's
@@ -81,6 +94,7 @@ export async function settlePayment(paymentId: string, opts: { gatewayRef: strin
     title: "Enrollment confirmed",
     body: `Payment of ${formatBDT(payment.amount)} received for ${payment.enrollment.course.title}. Welcome aboard!`,
     link: `/dashboard/courses/${payment.enrollment.courseId}`,
+    email: true,
   });
   await audit(opts.actorId ?? payment.userId, "payment.settle", "Payment", paymentId, {
     invoiceNo: payment.invoiceNo,

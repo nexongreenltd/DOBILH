@@ -7,7 +7,7 @@ import { AnimatePresence, motion } from "motion/react";
 import {
   LayoutDashboard, BookOpen, CalendarDays, ClipboardCheck, Award, Wallet, Bot, Bell, User, Users, Layers,
   Receipt, TicketPercent, BarChart3, Megaphone, ScrollText, Settings, GraduationCap, Menu, X, LogOut, Compass,
-  FileCheck2, CalendarClock, Library, ShieldCheck, Sparkles, ChevronRight,
+  FileCheck2, CalendarClock, Library, ShieldCheck, Sparkles, ChevronRight, Radio,
 } from "lucide-react";
 import { Logo } from "./logo";
 import { Avatar } from "./ui";
@@ -59,6 +59,7 @@ const NAV: Record<Area, { title?: string; items: NavItem[] }[]> = {
       items: [
         { href: "/admin/courses", label: "Courses", icon: Library },
         { href: "/admin/batches", label: "Batches & sessions", icon: Layers },
+        { href: "/admin/live", label: "Live classes", icon: Radio },
         { href: "/admin/assessments", label: "Assessments", icon: ClipboardCheck },
         { href: "/admin/certificates", label: "Certificates", icon: Award },
       ],

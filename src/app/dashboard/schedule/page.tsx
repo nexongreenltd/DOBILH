@@ -3,6 +3,7 @@ import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
 import { Card, EmptyState, IconChip, PageHeader, StatusBadge, Badge } from "@/components/ui";
 import { formatDate, formatTime } from "@/lib/utils";
+import { SessionJoin } from "@/components/session-join";
 
 export const metadata = { title: "Schedule" };
 
@@ -31,7 +32,7 @@ export default async function Schedule() {
             <div className="mb-2 text-[13px] font-medium text-muted-500">{day}</div>
             <div className="space-y-2">
               {list.map((s) => {
-                const live = s.startsAt <= now && s.endsAt >= now;
+                const live = s.status === "LIVE";
                 const past = s.endsAt < now;
                 return (
                   <Card key={s.id} className={`flex flex-wrap items-center gap-4 p-4 ${live ? "border-sun-400 ring-4 ring-sun-500/10" : ""}`}>
@@ -44,15 +45,12 @@ export default async function Schedule() {
                       <div className="text-[11px] text-muted-500">{s.batch.course.title} · {s.batch.name}</div>
                       <div className="font-medium text-navy-950">{s.title}</div>
                       <div className="mt-0.5 flex items-center gap-1 text-xs text-muted-600">
-                        {s.mode === "ONLINE" ? <><Video className="size-3" /> Online live class</> : <><MapPin className="size-3" /> {s.venue}</>}
+                        {s.mode === "ONLINE" ? <><Video className="size-3" /> {s.hosting === "PLATFORM" ? "DoB Live class" : "Online class (external link)"}</> : <><MapPin className="size-3" /> {s.venue}</>}
                       </div>
                     </div>
                     {live && <Badge tone="red">● Live now</Badge>}
                     {past ? (s.attendance[0] ? <StatusBadge status={s.attendance[0].status} /> : s.status === "CANCELLED" ? <StatusBadge status="CANCELLED" /> : <Badge><Clock className="size-3" /> Awaiting attendance</Badge>) : null}
-                    {!past && s.mode === "ONLINE" && s.liveUrl && (
-                      <a href={s.liveUrl} target="_blank" className={`rounded-xl px-4 py-2 text-sm font-semibold ${live ? "bg-sun-500 text-white" : "bg-navy-950 text-white"}`}>Join class</a>
-                    )}
-                    {past && s.recordingUrl && <a href={s.recordingUrl} target="_blank" className="text-sm font-medium text-azure-500">Watch recording</a>}
+                    <SessionJoin s={s} size="md" />
                   </Card>
                 );
               })}

@@ -32,4 +32,5 @@ export const ROUTE_RULES: { prefix: string; roles: Role[] }[] = [
   { prefix: "/dashboard", roles: ["STUDENT", "INSTRUCTOR", "ADMIN", "SUPER_ADMIN"] },
   { prefix: "/checkout", roles: ["STUDENT", "INSTRUCTOR", "ADMIN", "SUPER_ADMIN"] },
   { prefix: "/pay", roles: ["STUDENT", "INSTRUCTOR", "ADMIN", "SUPER_ADMIN"] },
+  { prefix: "/live", roles: ["STUDENT", "INSTRUCTOR", "ADMIN", "SUPER_ADMIN"] },
 ];

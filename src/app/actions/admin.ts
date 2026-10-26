@@ -273,7 +273,7 @@ export async function adminPaymentAction(form: FormData) {
       db.payment.update({ where: { id: p.id }, data: { status: "REFUNDED", note: optStr(form, "note") ?? "Refunded by admin" } }),
       db.enrollment.update({ where: { id: p.enrollmentId }, data: { status: "CANCELLED" } }),
     ]);
-    await notify(p.userId, { type: "payment", title: "Refund processed", body: `Your payment ${p.invoiceNo} for ${p.enrollment.course.title} has been refunded.`, link: "/dashboard/payments" });
+    await notify(p.userId, { type: "payment", title: "Refund processed", body: `Your payment ${p.invoiceNo} for ${p.enrollment.course.title} has been refunded.`, link: "/dashboard/payments", email: true });
     await audit(actor.id, "payment.refund", "Payment", p.id, { amount: p.amount });
   }
   if (action === "cancel" && p.status === "PENDING") {
@@ -405,7 +405,7 @@ export async function platformAnnouncement(_: ActionResult, form: FormData): Pro
     ids = (await db.user.findMany({ where: { role: { in: roles }, status: "ACTIVE" }, select: { id: true } })).map((u) => u.id);
     await db.announcement.create({ data: { authorId: actor.id, title, body } });
   }
-  await notifyMany(ids, { type: "announcement", title, body: body.slice(0, 160), link: "/dashboard/notifications" });
+  await notifyMany(ids, { type: "announcement", title, body: body.slice(0, 160), link: "/dashboard/notifications", email: form.get("sendEmail") === "on" });
   await audit(actor.id, "announcement.platform", "Announcement", null, { audience, courseId, recipients: ids.length });
   revalidatePath("/admin/announcements");
   return { ok: true, message: `Sent to ${ids.length} people.` };
@@ -423,7 +423,32 @@ export async function saveSettings(_: ActionResult, form: FormData): Promise<Act
   await setSetting("allowSelfRegistration", form.get("allowSelfRegistration") === "on");
   await setSetting("aiEnabled", form.get("aiEnabled") === "on");
   await setSetting("aiGenerative", form.get("aiGenerative") === "on");
+  // Live class policy
+  const clamp = (k: string, min: number, max: number, d: number) => Math.min(max, Math.max(min, int(form, k, d)));
+  await setSetting("liveHostEarlyMinutes", clamp("liveHostEarlyMinutes", 0, 240, 30));
+  await setSetting("liveJoinEarlyMinutes", clamp("liveJoinEarlyMinutes", 0, 120, 15));
+  await setSetting("liveLateAfterMinutes", clamp("liveLateAfterMinutes", 0, 120, 10));
+  await setSetting("livePresentPercent", clamp("livePresentPercent", 1, 100, 60));
+  await setSetting("replayRetentionDays", clamp("replayRetentionDays", 0, 3650, 90));
+  await setSetting("replayScope", str(form, "replayScope") === "COURSE" ? "COURSE" : "BATCH");
+  await setSetting("liveRecordingEnabled", form.get("liveRecordingEnabled") === "on");
+  await setSetting("liveChatEnabled", form.get("liveChatEnabled") === "on");
+  const instructions = str(form, "paymentInstructions").slice(0, 1000);
+  if (instructions) await setSetting("paymentInstructions", instructions);
   await audit(actor.id, "settings.update", "Setting", null);
   revalidatePath("/admin/settings");
   return { ok: true, message: "Settings saved." };
+}
+
+// ───────── Live classes ─────────
+
+/** Hide or re-show a published class replay without deleting it. */
+export async function toggleReplay(form: FormData) {
+  const actor = await requireAdmin();
+  const m = await db.material.findUnique({ where: { id: str(form, "materialId") } });
+  if (!m) return;
+  const visibility = m.visibility === "HIDDEN" ? "ENROLLED" : "HIDDEN";
+  await db.material.update({ where: { id: m.id }, data: { visibility } });
+  await audit(actor.id, visibility === "HIDDEN" ? "live.replay_hide" : "live.replay_show", "Material", m.id);
+  revalidatePath("/admin/live");
 }

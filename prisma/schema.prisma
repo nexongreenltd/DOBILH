@@ -27,19 +27,21 @@ enum UserStatus {
 }
 
 model User {
-  id           String     @id @default(cuid())
-  name         String
-  email        String     @unique
-  phone        String?
-  passwordHash String
-  role         Role       @default(STUDENT)
-  status       UserStatus @default(ACTIVE)
-  headline     String?
-  bio          String?
-  avatarColor  String     @default("#0f766e")
-  lastLoginAt  DateTime?
-  createdAt    DateTime   @default(now())
-  updatedAt    DateTime   @updatedAt
+  id                String     @id @default(cuid())
+  name              String
+  email             String     @unique
+  phone             String?
+  passwordHash      String
+  role              Role       @default(STUDENT)
+  status            UserStatus @default(ACTIVE)
+  headline          String?
+  bio               String?
+  avatarColor       String     @default("#0f766e")
+  lastLoginAt       DateTime?
+  /// Sessions issued before this moment are rejected (set on password reset).
+  sessionsValidFrom DateTime?
+  createdAt         DateTime   @default(now())
+  updatedAt         DateTime   @updatedAt
 
   teaching          CourseInstructor[]
   enrollments       Enrollment[]
@@ -57,8 +59,24 @@ model User {
   couponUsages      CouponUsage[]
   auditLogs         AuditLog[]
   files             StoredFile[]
+  livePresence      LivePresence[]
+  liveChat          LiveChatMessage[]
+  passwordResets    PasswordReset[]
 
   @@index([role, status])
+}
+
+/// One-time password-reset link. Only a SHA-256 hash of the token is stored.
+model PasswordReset {
+  id        String    @id @default(cuid())
+  userId    String
+  user      User      @relation(fields: [userId], references: [id], onDelete: Cascade)
+  tokenHash String    @unique
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime  @default(now())
+
+  @@index([userId])
 }
 
 // ───────────────────────── Catalogue ─────────────────────────
@@ -222,6 +240,9 @@ model Material {
   visibility Visibility   @default(ENROLLED)
   orderNo    Int          @default(0)
   createdAt  DateTime     @default(now())
+
+  /// Set when this material is the replay of a live class.
+  recordingOf ClassSession? @relation("SessionRecordingMaterial")
 }
 
 /// Object-storage record. Bytes live in the bucket; access is always brokered by the app.
@@ -237,6 +258,21 @@ model StoredFile {
 
   materials   Material[]
   submissions Submission[]
+  recordings  ClassSession[] @relation("SessionRecording")
+}
+
+/// PLATFORM = hosted in DoB Live (in-app streaming, auto-recorded); EXTERNAL = Zoom/Meet link.
+enum SessionHosting {
+  PLATFORM
+  EXTERNAL
+}
+
+enum RecordingStatus {
+  NONE
+  RECORDING
+  PROCESSING
+  READY
+  FAILED
 }
 
 enum SessionStatus {
@@ -247,24 +283,78 @@ enum SessionStatus {
 }
 
 model ClassSession {
-  id           String        @id @default(cuid())
-  batchId      String
-  batch        Batch         @relation(fields: [batchId], references: [id], onDelete: Cascade)
-  lessonId     String?
-  lesson       Lesson?       @relation(fields: [lessonId], references: [id], onDelete: SetNull)
-  title        String
-  mode         CourseMode    @default(ONLINE)
-  startsAt     DateTime
-  endsAt       DateTime
-  liveUrl      String?
-  venue        String?
-  recordingUrl String?
-  status       SessionStatus @default(SCHEDULED)
-  createdAt    DateTime      @default(now())
+  id             String        @id @default(cuid())
+  batchId        String
+  batch          Batch         @relation(fields: [batchId], references: [id], onDelete: Cascade)
+  lessonId       String?
+  lesson         Lesson?       @relation(fields: [lessonId], references: [id], onDelete: SetNull)
+  title          String
+  mode           CourseMode    @default(ONLINE)
+  startsAt       DateTime
+  endsAt         DateTime
+  liveUrl        String?
+  venue          String?
+  recordingUrl   String?
+  /// When the "starts soon" reminder went out (cron, ~1 hour before).
+  reminderSentAt DateTime?
+  status         SessionStatus @default(SCHEDULED)
+  createdAt      DateTime      @default(now())
+
+  // ── DoB Live (in-app streaming) ──
+  hosting             SessionHosting  @default(PLATFORM)
+  liveStartedAt       DateTime?
+  liveEndedAt         DateTime?
+  recordingStatus     RecordingStatus @default(NONE)
+  recordingFileId     String?
+  recordingFile       StoredFile?     @relation("SessionRecording", fields: [recordingFileId], references: [id], onDelete: SetNull)
+  recordingMaterialId String?         @unique
+  recordingMaterial   Material?       @relation("SessionRecordingMaterial", fields: [recordingMaterialId], references: [id], onDelete: SetNull)
+  recordingSeconds    Int?
 
   attendance Attendance[]
+  presence   LivePresence[]
+  chat       LiveChatMessage[]
 
   @@index([batchId, startsAt])
+  @@index([status])
+}
+
+/// Time a participant spent in a live class — drives automatic attendance.
+model LivePresence {
+  id            String       @id @default(cuid())
+  sessionId     String
+  session       ClassSession @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId        String
+  user          User         @relation(fields: [userId], references: [id], onDelete: Cascade)
+  isHost        Boolean      @default(false)
+  firstJoinedAt DateTime     @default(now())
+  lastSeenAt    DateTime     @default(now())
+  seconds       Int          @default(0)
+  joins         Int          @default(1)
+
+  @@unique([sessionId, userId])
+}
+
+enum LiveMessageKind {
+  CHAT
+  QUESTION
+}
+
+/// Live chat and Q&A, kept for the replay transcript.
+model LiveChatMessage {
+  id         String          @id @default(cuid())
+  sessionId  String
+  session    ClassSession    @relation(fields: [sessionId], references: [id], onDelete: Cascade)
+  userId     String
+  user       User            @relation(fields: [userId], references: [id], onDelete: Cascade)
+  kind       LiveMessageKind @default(CHAT)
+  body       String
+  /// Seconds since the class went live — lets the replay jump to the moment.
+  offsetSec  Int             @default(0)
+  answeredAt DateTime?
+  createdAt  DateTime        @default(now())
+
+  @@index([sessionId, createdAt])
 }
 
 enum AttendanceStatus {
@@ -425,12 +515,12 @@ model Submission {
   submittedAt  DateTime?
 
   // Marking
-  autoScore    Float?
-  obtained     Float?
-  feedback     String?
-  gradedById   String?
-  gradedBy     User?            @relation("SubmissionGrader", fields: [gradedById], references: [id], onDelete: SetNull)
-  gradedAt     DateTime?
+  autoScore  Float?
+  obtained   Float?
+  feedback   String?
+  gradedById String?
+  gradedBy   User?     @relation("SubmissionGrader", fields: [gradedById], references: [id], onDelete: SetNull)
+  gradedAt   DateTime?
 
   @@unique([assessmentId, studentId, attemptNo])
   @@index([studentId])

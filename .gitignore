@@ -11,3 +11,4 @@ next-env.d.ts
 *.log
 # Client proposal document (contains budget details) — kept out of the public repo
 DoB_Innovation_Learning_Hub_LMS_.pdf
+.next-build

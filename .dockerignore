@@ -1,0 +1,14 @@
+node_modules
+.next
+.next-dev
+.next-build
+.dev-db
+.env
+.env.*
+!.env.example
+storage/uploads
+*.log
+*.tsbuildinfo
+.git
+.DS_Store
+DoB_Innovation_Learning_Hub_LMS_.pdf

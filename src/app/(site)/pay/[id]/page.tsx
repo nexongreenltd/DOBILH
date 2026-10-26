@@ -3,7 +3,8 @@ import { notFound } from "next/navigation";
 import { ShieldCheck, XCircle, CheckCircle2, Lock } from "lucide-react";
 import { db } from "@/lib/db";
 import { requireUser } from "@/lib/auth";
-import { signCallback } from "@/lib/payments";
+import { paymentMode, signCallback } from "@/lib/payments";
+import { getSettings } from "@/lib/settings";
 import { gatewayCallback, retryPayment } from "@/app/actions/commerce";
 import { SubmitButton } from "@/components/forms";
 import { formatBDT, humanize } from "@/lib/utils";
@@ -18,6 +19,8 @@ export default async function PayPage({ params, searchParams }: { params: Promis
   const payment = await db.payment.findUnique({ where: { id }, include: { enrollment: { include: { course: true, batch: true } } } });
   if (!payment || payment.userId !== user.id) notFound();
 
+  const sandbox = paymentMode() === "sandbox";
+  const { paymentInstructions } = await getSettings();
   const ref = `TRX${payment.id.slice(-6).toUpperCase()}${Date.now().toString(36).toUpperCase()}`;
 
   return (
@@ -25,7 +28,7 @@ export default async function PayPage({ params, searchParams }: { params: Promis
       <div className="w-full max-w-md overflow-hidden rounded-3xl border border-line bg-white shadow-2xl shadow-[#2e1078]/10">
         <div className="flex items-center justify-between bg-lilac-500/80 px-6 py-4 text-white">
           <div className="flex items-center gap-2 font-semibold"><Lock className="size-4" /> DoB Secure Pay</div>
-          <span className="rounded-full bg-tangerine-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">Sandbox</span>
+          {sandbox && <span className="rounded-full bg-tangerine-500 px-2 py-0.5 text-[10px] font-bold uppercase tracking-wider">Sandbox</span>}
         </div>
         <div className="p-6">
           <div className="text-[13px] text-ink-faint">Paying for</div>
@@ -42,7 +45,13 @@ export default async function PayPage({ params, searchParams }: { params: Promis
 
           {error === "verification" && <p className="mt-4 rounded-xl bg-red-50 p-3 text-sm text-red-700">We couldn’t verify the payment response. No money was taken — please try again.</p>}
 
-          {payment.status === "PENDING" ? (
+          {payment.status === "PENDING" && !sandbox ? (
+            <div className="mt-6 space-y-3">
+              <div className="rounded-xl border border-line bg-lilac-500/[0.04] p-4 text-sm leading-relaxed text-ink-soft whitespace-pre-line">{paymentInstructions}</div>
+              <p className="text-xs text-ink-faint">Quote invoice <span className="font-medium text-ink">{payment.invoiceNo}</span> when you pay. You’ll get a notification as soon as the payment is confirmed.</p>
+              <Link href="/dashboard/payments" className="inline-flex h-11 w-full items-center justify-center rounded-xl border border-line text-sm font-medium text-ink">View my payments</Link>
+            </div>
+          ) : payment.status === "PENDING" ? (
             <div className="mt-6 space-y-2">
               <form action={gatewayCallback}>
                 <input type="hidden" name="paymentId" value={payment.id} />

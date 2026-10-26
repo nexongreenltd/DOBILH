@@ -2,14 +2,16 @@
 
 import { redirect } from "next/navigation";
 import { headers } from "next/headers";
+import crypto from "crypto";
 import { z } from "zod";
 import { db } from "@/lib/db";
-import { createSession, destroySession, hashPassword, verifyPassword, getCurrentUser } from "@/lib/auth";
+import { createSession, destroySession, hashPassword, verifyPassword, requireUser } from "@/lib/auth";
 import { homeFor } from "@/lib/rbac";
 import { rateLimit } from "@/lib/rate-limit";
 import { audit } from "@/lib/audit";
 import { notify } from "@/lib/notify";
 import { getSettings } from "@/lib/settings";
+import { renderEmail, sendEmail } from "@/lib/email";
 import type { ActionResult } from "@/lib/action";
 
 async function clientKey() {
@@ -102,8 +104,7 @@ const profileSchema = z.object({
 });
 
 export async function updateProfile(_: ActionResult, form: FormData): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user) redirect("/login");
+  const user = await requireUser();
   const parsed = profileSchema.safeParse(Object.fromEntries(form));
   if (!parsed.success) return { error: parsed.error.issues[0]?.message };
   await db.user.update({
@@ -119,8 +120,7 @@ export async function updateProfile(_: ActionResult, form: FormData): Promise<Ac
 }
 
 export async function changePassword(_: ActionResult, form: FormData): Promise<ActionResult> {
-  const user = await getCurrentUser();
-  if (!user) redirect("/login");
+  const user = await requireUser();
   const current = String(form.get("current") ?? "");
   const next = String(form.get("next") ?? "");
   if (next.length < 8) return { error: "New password must be at least 8 characters." };
@@ -129,4 +129,55 @@ export async function changePassword(_: ActionResult, form: FormData): Promise<A
   await db.user.update({ where: { id: user.id }, data: { passwordHash: await hashPassword(next) } });
   await audit(user.id, "user.password_change", "User", user.id);
   return { ok: true, message: "Password updated." };
+}
+
+// ───────── password reset ─────────
+
+const RESET_TTL_MS = 30 * 60 * 1000;
+const hashToken = (t: string) => crypto.createHash("sha256").update(t).digest("hex");
+
+/** Emails a one-time reset link. Always answers the same way so it can't be used to discover accounts. */
+export async function requestPasswordReset(_: ActionResult, form: FormData): Promise<ActionResult> {
+  const email = String(form.get("email") ?? "").trim().toLowerCase();
+  if (!z.string().email().safeParse(email).success) return { error: "Enter a valid email." };
+  const done: ActionResult = { ok: true, message: "If an account exists for that email, a reset link is on its way. It expires in 30 minutes." };
+  if (!rateLimit(`reset:${await clientKey()}`, 5, 60 * 60 * 1000).ok || !rateLimit(`reset:${email}`, 3, 60 * 60 * 1000).ok) return done;
+
+  const user = await db.user.findUnique({ where: { email } });
+  if (!user || user.status === "SUSPENDED") return done;
+  const token = crypto.randomBytes(32).toString("base64url");
+  await db.passwordReset.create({ data: { userId: user.id, tokenHash: hashToken(token), expiresAt: new Date(Date.now() + RESET_TTL_MS) } });
+  await sendEmail({
+    to: user.email,
+    subject: "Reset your DoB Hub password",
+    ...renderEmail({
+      name: user.name,
+      title: "Reset your password",
+      body: "Someone (hopefully you) asked to reset the password for this account. The link works once and expires in 30 minutes. If you didn't ask for this, you can ignore this email.",
+      cta: { label: "Choose a new password", path: `/reset-password?token=${token}` },
+    }),
+  });
+  await audit(user.id, "user.password_reset_request", "User", user.id);
+  return done;
+}
+
+export async function resetPassword(_: ActionResult, form: FormData): Promise<ActionResult> {
+  const token = String(form.get("token") ?? "");
+  const password = String(form.get("password") ?? "");
+  if (password.length < 8 || password.length > 100) return { error: "Password must be at least 8 characters." };
+  if (password !== String(form.get("confirm") ?? "")) return { error: "The two passwords don't match." };
+  if (!rateLimit(`reset-use:${await clientKey()}`, 10, 60 * 60 * 1000).ok) return { error: "Too many attempts. Try again later." };
+
+  const reset = await db.passwordReset.findUnique({ where: { tokenHash: hashToken(token) }, include: { user: true } });
+  if (!reset || reset.usedAt || reset.expiresAt < new Date() || reset.user.status === "SUSPENDED") {
+    return { error: "This reset link is invalid or has expired. Request a new one." };
+  }
+  const now = new Date();
+  await db.$transaction([
+    db.user.update({ where: { id: reset.userId }, data: { passwordHash: await hashPassword(password), sessionsValidFrom: now } }),
+    db.passwordReset.updateMany({ where: { userId: reset.userId, usedAt: null }, data: { usedAt: now } }),
+  ]);
+  await audit(reset.userId, "user.password_reset", "User", reset.userId);
+  await destroySession();
+  redirect("/login?reset=1");
 }
